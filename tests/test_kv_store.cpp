@@ -8,10 +8,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <thread>
 #include <vector>
 
 #include "kv_store.hpp"
+#include "protocol.hpp"
 
 namespace {
 
@@ -70,6 +72,7 @@ void test_ttl_expiry() {
     CHECK(store.get("k").has_value());
     std::this_thread::sleep_for(std::chrono::milliseconds(1100));
     CHECK(store.get("k") == std::nullopt);  // lazily expired on read
+    CHECK(store.size() == 0);
 }
 
 void test_expire_command() {
@@ -130,6 +133,58 @@ void test_aof_persistence_roundtrip() {
     std::filesystem::remove(path);
 }
 
+void test_aof_binary_safe_roundtrip() {
+    const std::string path = "test_cppkv_special.aof";
+    std::filesystem::remove(path);
+
+    {
+        KVStore store(path);
+        store.set("key with spaces", "value with spaces\nand a newline");
+    }
+
+    {
+        KVStore reloaded(path);
+        CHECK(reloaded.get("key with spaces").value_or("") ==
+              "value with spaces\nand a newline");
+    }
+
+    std::filesystem::remove(path);
+}
+
+void test_protocol_validation() {
+    KVStore store;
+    CHECK(protocol::handle_command(store, "PING") == "PONG");
+    CHECK(protocol::handle_command(store, "SET key value") == "OK");
+    CHECK(protocol::handle_command(store, "GET key") == "VALUE value");
+    CHECK(protocol::handle_command(store, "SET key value EX 0") ==
+          "ERROR TTL must be positive");
+    CHECK(protocol::handle_command(store, "EXPIRE key -1") ==
+          "ERROR TTL must be positive");
+    CHECK(protocol::handle_command(store, "UNKNOWN") ==
+          "ERROR unknown command 'UNKNOWN'");
+}
+
+void test_truncated_aof_tail_is_ignored() {
+    const std::string path = "test_cppkv_truncated.aof";
+    std::filesystem::remove(path);
+
+    {
+        KVStore store(path);
+        store.set("stable", "value");
+    }
+    {
+        std::ofstream out(path, std::ios::app);
+        out << "SET 8 partial";
+    }
+    {
+        KVStore reloaded(path);
+        CHECK(reloaded.get("stable").value_or("") == "value");
+        CHECK(reloaded.get("partial") == std::nullopt);
+    }
+
+    std::filesystem::remove(path);
+}
+
 }  // namespace
 
 int main() {
@@ -142,6 +197,9 @@ int main() {
     run("size", test_size);
     run("concurrent_writes", test_concurrent_writes);
     run("aof_persistence_roundtrip", test_aof_persistence_roundtrip);
+    run("aof_binary_safe_roundtrip", test_aof_binary_safe_roundtrip);
+    run("protocol_validation", test_protocol_validation);
+    run("truncated_aof_tail_is_ignored", test_truncated_aof_tail_is_ignored);
 
     std::fprintf(stderr, "\n%d/%d checks passed\n", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

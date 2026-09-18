@@ -1,7 +1,7 @@
 // cppkv_bench - simple multithreaded load generator.
 //
 // Spawns N client threads, each performing M SET+GET pairs against the
-// server, and reports throughput (ops/sec) and average latency.
+// server, and reports completed operations, errors, elapsed time, and throughput.
 //
 // Usage:
 //   cppkv_bench [--host 127.0.0.1] [--port 6380] [--clients 8] [--ops 5000]
@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <iostream>
@@ -20,6 +21,18 @@
 #include <vector>
 
 namespace {
+
+bool send_all(int fd, const std::string& message) {
+    size_t sent_total = 0;
+    while (sent_total < message.size()) {
+        const ssize_t sent = send(fd, message.data() + sent_total,
+                                  message.size() - sent_total, 0);
+        if (sent < 0 && errno == EINTR) continue;
+        if (sent <= 0) return false;
+        sent_total += static_cast<size_t>(sent);
+    }
+    return true;
+}
 
 int connect_to(const std::string& host, int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -42,10 +55,14 @@ int connect_to(const std::string& host, int port) {
 
 bool roundtrip(int fd, const std::string& cmd) {
     std::string msg = cmd + "\n";
-    if (send(fd, msg.data(), msg.size(), 0) < 0) return false;
-    char buf[256];
-    ssize_t n = recv(fd, buf, sizeof(buf), 0);
-    return n > 0;
+    if (!send_all(fd, msg)) return false;
+    char ch;
+    while (true) {
+        const ssize_t n = recv(fd, &ch, 1, 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return false;
+        if (ch == '\n') return true;
+    }
 }
 
 void worker(const std::string& host, int port, int ops_per_client, int client_id,

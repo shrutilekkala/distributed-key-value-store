@@ -1,7 +1,7 @@
 #pragma once
 // TCPServer: accepts connections on a listening socket and dispatches each
 // connection's full lifecycle (read -> parse -> execute -> write, looped
-// until the client disconnects) to a worker in a bounded ThreadPool.
+// until the client disconnects) to a worker in a fixed-size ThreadPool.
 //
 // This is "thread-pool-per-connection", not epoll/io_uring based
 // multiplexing. It's simpler to reason about and correct, and is more than

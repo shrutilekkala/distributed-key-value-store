@@ -30,6 +30,7 @@ std::string handle_set(KVStore& store, const std::vector<std::string>& t) {
         if (t[3] != "EX") return "ERROR usage: SET <key> <value> [EX <seconds>]";
         try {
             ttl = std::stoll(t[4]);
+            if (*ttl <= 0) return "ERROR TTL must be positive";
         } catch (...) {
             return "ERROR invalid TTL";
         }
@@ -64,6 +65,7 @@ std::string handle_command(KVStore& store, const std::string& line) {
         if (t.size() != 3) return "ERROR usage: EXPIRE <key> <seconds>";
         try {
             int64_t secs = std::stoll(t[2]);
+            if (secs <= 0) return "ERROR TTL must be positive";
             return store.expire(t[1], secs) ? "OK" : "NOT_FOUND";
         } catch (...) {
             return "ERROR invalid TTL";

@@ -1,5 +1,5 @@
 #pragma once
-// A fixed-size thread pool with a bounded work queue.
+// A fixed-size thread pool with a synchronized work queue.
 //
 // Design notes:
 //  - Workers block on a condition_variable until work arrives or the pool

@@ -13,11 +13,24 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstring>
 #include <iostream>
 #include <string>
 
 namespace {
+
+bool send_all(int fd, const std::string& message) {
+    size_t sent_total = 0;
+    while (sent_total < message.size()) {
+        const ssize_t sent = send(fd, message.data() + sent_total,
+                                  message.size() - sent_total, 0);
+        if (sent < 0 && errno == EINTR) continue;
+        if (sent <= 0) return false;
+        sent_total += static_cast<size_t>(sent);
+    }
+    return true;
+}
 
 int connect_to(const std::string& host, int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -45,15 +58,18 @@ int connect_to(const std::string& host, int port) {
 
 std::string send_command(int fd, const std::string& line) {
     std::string msg = line + "\n";
-    if (send(fd, msg.data(), msg.size(), 0) < 0) return "ERROR send failed";
+    if (!send_all(fd, msg)) return "ERROR send failed";
 
-    char buf[4096];
-    ssize_t n = recv(fd, buf, sizeof(buf) - 1, 0);
-    if (n <= 0) return "ERROR connection closed";
-    buf[n] = '\0';
-    std::string resp(buf);
-    if (!resp.empty() && resp.back() == '\n') resp.pop_back();
-    return resp;
+    std::string response;
+    char chunk[1024];
+    while (true) {
+        const ssize_t n = recv(fd, chunk, sizeof(chunk), 0);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return "ERROR connection closed";
+        response.append(chunk, static_cast<size_t>(n));
+        const size_t newline = response.find('\n');
+        if (newline != std::string::npos) return response.substr(0, newline);
+    }
 }
 
 }  // namespace

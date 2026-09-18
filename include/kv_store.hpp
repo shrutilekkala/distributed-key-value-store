@@ -20,7 +20,6 @@
 
 #include <chrono>
 #include <cstdint>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -79,6 +78,6 @@ private:
     std::vector<std::unique_ptr<Shard>> shards_;
 
     std::string aof_path_;
-    std::ofstream aof_out_;
+    int aof_fd_ = -1;
     std::mutex aof_mutex_;  // serializes appends across shards
 };

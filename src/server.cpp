@@ -12,6 +12,22 @@
 
 #include "protocol.hpp"
 
+namespace {
+
+bool send_all(int fd, const std::string& message) {
+    size_t sent_total = 0;
+    while (sent_total < message.size()) {
+        const ssize_t sent = send(fd, message.data() + sent_total,
+                                  message.size() - sent_total, 0);
+        if (sent < 0 && errno == EINTR) continue;
+        if (sent <= 0) return false;
+        sent_total += static_cast<size_t>(sent);
+    }
+    return true;
+}
+
+}  // namespace
+
 TCPServer::TCPServer(int port, KVStore& store, size_t num_worker_threads)
     : port_(port), store_(store), pool_(num_worker_threads) {}
 
@@ -93,10 +109,18 @@ void TCPServer::handle_connection(int client_fd) {
 
             if (line.empty()) continue;
 
-            std::string response = protocol::handle_command(store_, line);
+            std::string response;
+            try {
+                response = protocol::handle_command(store_, line);
+            } catch (const std::exception& error) {
+                std::cerr << "request failed: " << error.what() << '\n';
+                response = "ERROR storage failure";
+            }
             response.push_back('\n');
-            ssize_t sent = send(client_fd, response.data(), response.size(), 0);
-            (void)sent;  // best-effort; connection errors surface via next recv()
+            if (!send_all(client_fd, response)) {
+                close(client_fd);
+                return;
+            }
         }
     }
 
